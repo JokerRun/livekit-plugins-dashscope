@@ -9,7 +9,7 @@ setup(
     url="https://github.com/JerryRuan/livekit-plugins-dashscope",
     packages=find_namespace_packages(include=["livekit.*"]),
     install_requires=[
-        "livekit-agents>=0.10.0",
+        "livekit-agents>=0.8.0",
         "dashscope>=1.0.0",
     ],
     python_requires=">=3.8",
