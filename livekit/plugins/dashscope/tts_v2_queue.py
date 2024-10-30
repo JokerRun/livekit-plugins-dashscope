@@ -10,7 +10,6 @@ import dashscope
 from dashscope.audio.tts_v2 import SpeechSynthesizer, ResultCallback, AudioFormat
 from livekit.agents import tts, utils,tokenize
 from livekit import rtc
-
 from .log import logger
 # https://help.aliyun.com/zh/dashscope/developer-reference/cosyvoice-quick-start
 DASHSCOPE_TTS_CHANNELS = 1
@@ -89,10 +88,11 @@ class TTSV2(tts.TTS):
 
 class SynthesizeStream(tts.SynthesizeStream):
     def __init__(self, opts: _TTSOptions):
-        logger.debug("\033[32m [[tts.stream]] 实例化一个SynthesizeStream\033[0m")
         super().__init__()
         self._opts = opts
         self._sent_tokenizer_stream = opts.sent_tokenizer.stream()
+        self._callback_queue = utils.aio.Chan[tts.SynthesizedAudio]()
+        self._complete_event = asyncio.Event()  # 添加完成事件
 
     @utils.log_exceptions(logger=logger)
     async def _main_task(self) -> None:
@@ -111,7 +111,7 @@ class SynthesizeStream(tts.SynthesizeStream):
             pitch_rate=self._opts.pitch
         )
 
-        async def input_task():
+        async def text_input_task():
             async for data in self._input_ch:
                 if isinstance(data, self._FlushSentinel):
                     self._sent_tokenizer_stream.flush()
@@ -121,24 +121,40 @@ class SynthesizeStream(tts.SynthesizeStream):
 
 
         async def sentence_stream_task():
-            async for ev in self._sent_tokenizer_stream:
-                logger.info(f"\033[32m[[tts.sentence_stream_task]] detected: {ev.token}\033[0m")
-                synthesizer.streaming_call(ev.token)
             try:
-                # streaming_complete存在严重阻塞，影响其他任务，通过其他线程异步执行
-                await asyncio.get_event_loop().run_in_executor(None, synthesizer.streaming_complete) 
-            except Exception as e:
-                logger.error(f"TTS streaming_complete error: {e}")
-
-        tasks = [
-            asyncio.create_task(input_task()),
-            asyncio.create_task(sentence_stream_task()),
-        ]
+                async for ev in self._sent_tokenizer_stream:
+                    logger.info(f"\033[32m[[tts.sentence_stream_task]] detected: {ev.token}\033[0m")
+                    synthesizer.streaming_call(ev.token)
+                # 使用异步方式处理完成事件
+                await asyncio.get_event_loop().run_in_executor(None, synthesizer.streaming_complete)
+            finally:
+                self._complete_event.set()  # 设置完成事件
+            
+        async def audio_output_task():
+            try:
+                async for syn_audio in self._callback_queue:
+                    logger.info("\033[32m [[tts.stream]] 开始输出音频数据\033[0m")
+                    self._event_ch.send_nowait(syn_audio)
+                # 等待所有音频数据处理完成
+                await self._complete_event.wait()
+            finally:
+                self._callback_queue.close()
+        # 创建三个独立的任务
+        input_task = asyncio.create_task(text_input_task())
+        sentence_task = asyncio.create_task(sentence_stream_task()) 
+        output_task = asyncio.create_task(audio_output_task())
 
         try:
-            await asyncio.gather(*tasks)
+            # 等待两个任务都完成
+            await input_task
+            await sentence_task
+            await output_task
+        except Exception as e:
+            logger.error(f"TTS任务执行出错: {e}")
+            raise
         finally:
-            await utils.aio.gracefully_cancel(*tasks)
+            # 确保清理任务
+            await utils.aio.gracefully_cancel(text_input_task, sentence_task,output_task)
                 
     class Callback(ResultCallback):
         def __init__(self, opts: _TTSOptions,stream,request_id,segment_id):
@@ -152,32 +168,32 @@ class SynthesizeStream(tts.SynthesizeStream):
             self.stream=stream
 
         # def on_open(self) -> None:
-        #     logger.debug("Synthesis started")
+        #     logger.info("Synthesis started")
 
         def on_complete(self) -> None:
             # 输出剩余数据
             for frame in self.audio_byte_stream.flush():
-                self.stream._event_ch.send_nowait(
+                self.stream._callback_queue.send_nowait(
                     tts.SynthesizedAudio(
                         request_id=self.request_id,
                         segment_id=self.segment_id,
                         frame=frame,
                     )
                 )
-            logger.debug("\033[32m [[tts.stream]] 音频数据已输出完成\033[0m")
+            logger.info("\033[32m [[tts.stream]] 音频数据已输出完成\033[0m")
 
         # def on_error(self, message) -> None:
         #     logger.error(f"Synthesis error: {message}")
 
-        # def on_close(self) -> None:
-        #     logger.debug("Synthesis closed")
+        def on_close(self) -> None:
+            logger.info("Synthesis closed")
 
         # def on_event(self, message: str) -> None:
         #     logger.debug(f"Synthesis event: {message}")
 
         def on_data(self, data: bytes) -> None:
             for frame in self.audio_byte_stream.write(data):
-                self.stream._event_ch.send_nowait(
+                self.stream._callback_queue.send_nowait(
                     tts.SynthesizedAudio(
                         request_id=self.request_id,
                         segment_id=self.segment_id,
