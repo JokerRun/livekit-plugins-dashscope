@@ -12,7 +12,7 @@ from livekit.agents import tts, utils,tokenize
 from livekit import rtc
 
 from .log import logger
-
+# https://help.aliyun.com/zh/dashscope/developer-reference/cosyvoice-quick-start
 DASHSCOPE_TTS_CHANNELS = 1
 BUFFERED_WORDS_COUNT=8
 @dataclass 
@@ -76,7 +76,7 @@ class TTSV2(tts.TTS):
 
     def synthesize(self, text: str) -> tts.ChunkedStream:
         """实现非流式合成方法"""
-        logger.debug(f"DashScope TTS V2 synthesize: {text}")
+        logger.debug(f"\033[32mDashScope TTS V2 synthesize: {text}\033[0m")
         return ChunkedStream(
             text=text,
             opts=self._opts
@@ -121,7 +121,7 @@ class SynthesizeStream(tts.SynthesizeStream):
 
         async def sentence_stream_task():
             async for ev in self._sent_tokenizer_stream:
-                logger.info(f"\033[32m[[sentence_stream_task]] detected: {ev.token}\033[0m")
+                logger.info(f"\033[32m[[tts.sentence_stream_task]] detected: {ev.token}\033[0m")
                 synthesizer.streaming_call(ev.token)
             synthesizer.streaming_complete()
 
@@ -140,7 +140,7 @@ class SynthesizeStream(tts.SynthesizeStream):
             self._opts = opts
             self.request_id = request_id
             self.segment_id = segment_id
-            self.audio_bstream = utils.audio.AudioByteStream(
+            self.audio_byte_stream = utils.audio.AudioByteStream(
                 sample_rate=self._opts.format.sample_rate,
                 num_channels=DASHSCOPE_TTS_CHANNELS,
             )
@@ -149,8 +149,17 @@ class SynthesizeStream(tts.SynthesizeStream):
         # def on_open(self) -> None:
         #     logger.info("Synthesis started")
 
-        # def on_complete(self) -> None:
-        #     logger.info(f"callback completed")
+        def on_complete(self) -> None:
+            # 输出剩余数据
+            # for frame in self.audio_byte_stream.flush():
+            #     self.stream._event_ch.send_nowait(
+            #         tts.SynthesizedAudio(
+            #             request_id=self.request_id,
+            #             segment_id=self.segment_id,
+            #             frame=frame,
+            #         )
+            #     )
+            logger.info("\033[32m [[tts.stream]] 音频数据已输出完成\033[0m")
 
         # def on_error(self, message) -> None:
         #     logger.error(f"Synthesis error: {message}")
@@ -162,7 +171,7 @@ class SynthesizeStream(tts.SynthesizeStream):
         #     logger.debug(f"Synthesis event: {message}")
 
         def on_data(self, data: bytes) -> None:
-            for frame in self.audio_bstream.write(data):
+            for frame in self.audio_byte_stream.write(data):
                 self.stream._event_ch.send_nowait(
                     tts.SynthesizedAudio(
                         request_id=self.request_id,

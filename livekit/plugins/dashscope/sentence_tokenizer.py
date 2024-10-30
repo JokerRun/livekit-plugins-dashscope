@@ -38,7 +38,7 @@ class ChineseSentenceTokenizer(tokenize.SentenceTokenizer):
             min_sentence_len=min_sentence_len,
             stream_context_len=stream_context_len,
             sentence_ends=['。', '！', '？', '…', '；', '.', '!', '?', '...', ';'],
-            quote_pairs={'"': '"', '"': '"', '「': '」', '『': '』'}
+            quote_pairs={'"': '"', '"': '"', '「': '」', '『': '』', '“': '”', '《': '》', '〈': '〉', '【': '】', '（': '）'}
         )
 
     def _sanitize_options(self) -> _TokenizerOptions:
