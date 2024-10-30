@@ -98,23 +98,23 @@ class STT(stt.STT):
                 wav.setframerate(buffer.sample_rate)
                 wav.writeframes(buffer.data)
             temp_file_path = temp_file.name
-        result = recognition.call(temp_file_path)
-        if result.status_code == HTTPStatus.OK:
-            text = "".join(sentence.get("text", "") for sentence in result.get_sentence() or [])
-            logger.debug(f"识别结果: {text}")
-            return stt.SpeechEvent(
-                type=stt.SpeechEventType.FINAL_TRANSCRIPT,
-                alternatives=[
-                    stt.SpeechData(
-                        text=text,
-                        confidence=1.0,
-                        language=self._opts.language,
-                    )
-                ]
-            )
-        else:
-            logger.error(f"识别请求失败: {result.message}")
-            raise Exception(f"识别请求失败: {result.message}")
+            result = recognition.call(temp_file_path)
+            if result.status_code == HTTPStatus.OK:
+                text = "".join(sentence.get("text", "") for sentence in result.get_sentence() or [])
+                logger.debug(f"识别结果: {text}")
+                return stt.SpeechEvent(
+                    type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                    alternatives=[
+                        stt.SpeechData(
+                            text=text,
+                            confidence=1.0,
+                            language=self._opts.language,
+                        )
+                    ]
+                )
+            else:
+                logger.error(f"识别请求失败: {result.message}")
+                raise Exception(f"识别请求失败: {result.message}")
         
         
     def stream(self) -> "SpeechStream":
