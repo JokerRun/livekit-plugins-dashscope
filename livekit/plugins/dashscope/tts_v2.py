@@ -8,14 +8,17 @@ import asyncio
 
 import dashscope
 from dashscope.audio.tts_v2 import SpeechSynthesizer, ResultCallback, AudioFormat
-from livekit.agents import tts, utils,tokenize
+from livekit.agents import tts, utils, tokenize
 from livekit import rtc
 
 from .log import logger
+
 # https://help.aliyun.com/zh/dashscope/developer-reference/cosyvoice-quick-start
 DASHSCOPE_TTS_CHANNELS = 1
-BUFFERED_WORDS_COUNT=8
-@dataclass 
+BUFFERED_WORDS_COUNT = 8
+
+
+@dataclass
 class _TTSOptions:
     model: str
     voice: str
@@ -26,20 +29,22 @@ class _TTSOptions:
     word_timestamp_enabled: bool  # 是否开启字级别时间戳
     phoneme_timestamp_enabled: bool  # 是否开启音素级别时间戳
     sent_tokenizer: tokenize.SentenceTokenizer
+
+
 class TTSV2(tts.TTS):
     def __init__(
-        self,
-        *,
-        model: str = "cosyvoice-v1",
-        voice: str = "longxiaochun",
-        format: AudioFormat = AudioFormat.WAV_16000HZ_MONO_16BIT,
-        volume: int = 50,
-        rate: float = 1.0,
-        pitch: float = 1.0,
-        word_timestamp_enabled: bool = False,
-        phoneme_timestamp_enabled: bool = False,
-        api_key: str | None = None,
-        sent_tokenizer: tokenize.SentenceTokenizer = tokenize.basic.SentenceTokenizer()
+            self,
+            *,
+            model: str = "cosyvoice-v1",
+            voice: str = "longxiaochun",
+            format: AudioFormat = AudioFormat.WAV_16000HZ_MONO_16BIT,
+            volume: int = 50,
+            rate: float = 1.0,
+            pitch: float = 1.0,
+            word_timestamp_enabled: bool = False,
+            phoneme_timestamp_enabled: bool = False,
+            api_key: str | None = None,
+            sent_tokenizer: tokenize.SentenceTokenizer = tokenize.basic.SentenceTokenizer()
     ) -> None:
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=True),
@@ -61,7 +66,7 @@ class TTSV2(tts.TTS):
             raise ValueError("DashScope API key is required")
 
         dashscope.api_key = api_key
-        
+
         self._opts = _TTSOptions(
             model=model,
             voice=voice,
@@ -78,19 +83,20 @@ class TTSV2(tts.TTS):
         """实现非流式合成方法"""
         logger.debug(f"\033[32mDashScope TTS V2 synthesize: {text}\033[0m")
         return ChunkedStream(
+            tts=self,
             text=text,
             opts=self._opts
         )
-        
 
     def stream(self) -> SynthesizeStream:
         """实现流式合成方法"""
-        return SynthesizeStream(self._opts)
+        return SynthesizeStream(self, self._opts)
+
 
 class SynthesizeStream(tts.SynthesizeStream):
-    def __init__(self, opts: _TTSOptions):
+    def __init__(self, tts, opts: _TTSOptions):
         logger.debug("\033[32m [[tts.stream]] 实例化一个SynthesizeStream\033[0m")
-        super().__init__()
+        super().__init__(tts=tts)
         self._opts = opts
         self._sent_tokenizer_stream = opts.sent_tokenizer.stream()
 
@@ -100,7 +106,7 @@ class SynthesizeStream(tts.SynthesizeStream):
         request_id = utils.shortuuid()
         segment_id = utils.shortuuid()
 
-        callback = self.Callback(self._opts,self,request_id,segment_id)
+        callback = self.Callback(self._opts, self, request_id, segment_id)
         synthesizer = SpeechSynthesizer(
             model=self._opts.model,
             voice=self._opts.voice,
@@ -119,14 +125,13 @@ class SynthesizeStream(tts.SynthesizeStream):
                 self._sent_tokenizer_stream.push_text(data)
             self._sent_tokenizer_stream.end_input()
 
-
         async def sentence_stream_task():
             async for ev in self._sent_tokenizer_stream:
                 logger.info(f"\033[32m[[tts.sentence_stream_task]] detected: {ev.token}\033[0m")
                 synthesizer.streaming_call(ev.token)
             try:
                 # streaming_complete存在严重阻塞，影响其他任务，通过其他线程异步执行
-                await asyncio.get_event_loop().run_in_executor(None, synthesizer.streaming_complete) 
+                await asyncio.get_event_loop().run_in_executor(None, synthesizer.streaming_complete)
             except Exception as e:
                 logger.error(f"TTS streaming_complete error: {e}")
 
@@ -139,9 +144,9 @@ class SynthesizeStream(tts.SynthesizeStream):
             await asyncio.gather(*tasks)
         finally:
             await utils.aio.gracefully_cancel(*tasks)
-                
+
     class Callback(ResultCallback):
-        def __init__(self, opts: _TTSOptions,stream,request_id,segment_id):
+        def __init__(self, opts: _TTSOptions, stream, request_id, segment_id):
             self._opts = opts
             self.request_id = request_id
             self.segment_id = segment_id
@@ -149,7 +154,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                 sample_rate=self._opts.format.sample_rate,
                 num_channels=DASHSCOPE_TTS_CHANNELS,
             )
-            self.stream=stream
+            self.stream = stream
 
         # def on_open(self) -> None:
         #     logger.debug("Synthesis started")
@@ -184,18 +189,17 @@ class SynthesizeStream(tts.SynthesizeStream):
                         frame=frame,
                     )
                 )
-            
-            
 
 
 class ChunkedStream(tts.ChunkedStream):
     def __init__(
-        self,
-        *,
-        text: str,
-        opts: _TTSOptions,
+            self,
+            *,
+            tts,
+            text: str,
+            opts: _TTSOptions,
     ) -> None:
-        super().__init__()
+        super().__init__(tts, text)
         self._text = text
         self._opts = opts
 

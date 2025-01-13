@@ -78,7 +78,7 @@ class STT(stt.STT):
             language=language
         )
 
-    async def recognize(self, buffer: AudioBuffer, **kwargs) -> stt.SpeechEvent:
+    async def _recognize_impl(self, buffer: AudioBuffer, **kwargs) -> stt.SpeechEvent:
         """实现非流式识别"""
         logger.info(f"\033[32mDashScope STT recognize调用\033[0m")
 

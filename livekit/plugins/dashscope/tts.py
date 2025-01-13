@@ -20,7 +20,8 @@ DASHSCOPE_TTS_CHANNELS = 1
 
 AudioFormat = Literal["wav", "mp3", "pcm"]
 
-@dataclass 
+
+@dataclass
 class _TTSOptions:
     model: str
     sample_rate: int
@@ -31,19 +32,20 @@ class _TTSOptions:
     word_timestamp_enabled: bool  # 是否开启字级别时间戳
     phoneme_timestamp_enabled: bool  # 是否开启音素级别时间戳
 
+
 class TTS(tts.TTS):
     def __init__(
-        self,
-        *,
-        model: str = "sambert-zhichu-v1",
-        sample_rate: int = DASHSCOPE_TTS_SAMPLE_RATE,
-        format: AudioFormat = "wav",
-        volume: int = 50,
-        rate: float = 1.0,
-        pitch: float = 1.0,
-        word_timestamp_enabled: bool = False,
-        phoneme_timestamp_enabled: bool = False,
-        api_key: str | None = None,
+            self,
+            *,
+            model: str = "sambert-zhichu-v1",
+            sample_rate: int = DASHSCOPE_TTS_SAMPLE_RATE,
+            format: AudioFormat = "wav",
+            volume: int = 50,
+            rate: float = 1.0,
+            pitch: float = 1.0,
+            word_timestamp_enabled: bool = False,
+            phoneme_timestamp_enabled: bool = False,
+            api_key: str | None = None,
     ) -> None:
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=False),
@@ -65,7 +67,7 @@ class TTS(tts.TTS):
             raise ValueError("DashScope API key is required")
 
         dashscope.api_key = api_key
-        
+
         self._opts = _TTSOptions(
             model=model,
             sample_rate=sample_rate,
@@ -79,19 +81,23 @@ class TTS(tts.TTS):
 
     def synthesize(self, text: str) -> ChunkedStream:
         return ChunkedStream(
+            tts=self,
             text=text,
             opts=self._opts
         )
 
+
 class ChunkedStream(tts.ChunkedStream):
     def __init__(
-        self,
-        *,
-        text: str,
-        opts: _TTSOptions,
+            self,
+            *,
+            tts: TTS,
+            text: str,
+            opts: _TTSOptions,
     ) -> None:
-        super().__init__()
+        super().__init__(tts=tts,text=text)
         self._text = text
+        self._tts = tts
         self._opts = opts
 
     @utils.log_exceptions(logger=logger)
